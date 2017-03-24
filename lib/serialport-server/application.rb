@@ -66,6 +66,7 @@ module SerialportServer
       @recvs = Array.new
       @channel = EM::Channel.new
       @channel.subscribe do |data|
+        puts "SUBSCRIBE: #{data}"
         now = Time.now.to_i*1000+(Time.now.usec/1000.0).round
         @recvs.unshift({:time => now, :data => data})
         while @recvs.size > 100 do
@@ -87,10 +88,19 @@ module SerialportServer
             sid = @channel.subscribe do |mes|
               ws.send mes.to_s
             end
+
             puts "* new websocket client <#{sid}> connected"
             ws.onmessage do |mes|
-              puts "* websocket client <#{sid}> : #{mes}"
-              @serialport.puts mes.strip
+                puts "* websocket client <#{sid}> : #{mes}"
+                @serialport.puts mes.strip
+            end
+
+            ws.onbinary do |mes|
+                m = mes.unpack('C*')
+
+                puts "* websocket client (BINARY) <#{sid}> : #{mes}"
+                puts "* websocket client (BINARY) <#{sid}> : #{m.join(',')}"
+                m.map{|x| @serialport.putc(x) }
             end
 
             ws.onclose do
@@ -101,23 +111,114 @@ module SerialportServer
         end
         puts "start WebSocket server - port #{@args[:websocket_port].to_i}"
 
-        EM::defer do
-          loop do
-            data = @serialport.gets.gsub(/[\r\n]/,'') rescue next
-            data = data.to_i if data =~ /^\d+$/
-            next if !data or data.to_s.empty?
-            @channel.push data
-            puts data
-          end
-        end
+         # EM::defer do
+         #   loop do
+         #     data = @serialport.readbyte rescue next
+         #     next if !data or data == ''
+         #     puts "XXX #{data}>>"
+         #     #data = data.unpack('C*')
+         #     @channel.push data
+         #     #puts data.join(',')
+         #     puts "Serialport:READ:Binary: #{data}"
+         #   end
+         # end
 
-        EM::defer do
-          loop do
-            line = STDIN.gets.gsub(/[\r\n]/,'') rescue next
-            next if !line or line.to_s.empty?
-            @serialport.puts line rescue next
-          end
-        end
+         EM::defer do
+           loop do
+             begin
+               data = @serialport.readbyte
+               next if !data or data == ''
+               # @dd = @dd.nil? ? [data] : @dd << data
+               @dd = (@dd || []) << data
+               puts "DEBUG: current data: @dd: " + @dd.join(',')
+               # puts "READBYTE: #{data}>>"
+
+               # ruby 2.4.0 icin asagidaki kodlar eklendi
+               #
+               # Example:
+               #
+               #    [253, 1, 2, 3, 4, 254]      => Ok
+               #    [253, 1, 2, 3, 4, 5, 254]   => Dummy
+               #    [253, 1, 2, 3, 254]         => Dummy: []
+               #    [253, 1, 2, 3, 253]         => Dummy: [253]
+               #    [1, 2, 3, 4]                => Dummy: []
+               #
+               bSTART = 253; bSTOP = 254; bSIZE = 6
+               puts "XXX bSTART = #{bSTART}; bSTOP = #{bSTOP}; bSIZE = #{bSIZE}"
+
+               puts "XXX first: #{@dd.first}, count: #{@dd.count}"
+
+               if @dd.first != bSTART # dummy data
+                   puts "DEBUG: dummy data: " + @dd.join(',')
+                   @dd = [] 
+               elsif data == bSTART
+                   puts "DEBUG: dummy data: " + @dd.join(',')
+                   @dd = [data]
+               end
+
+               if @dd.count == bSIZE
+                   if @dd.last == bSTOP # it's ok.
+                       @channel.push @dd
+                       puts "Serialport:READ:Binary: #{@dd.join(',')}"
+                       @dd = []
+                   else
+                       puts "DEBUG: dummy data: " + @dd.join(',')
+
+                       # START gelirse kurtarmaya çalış
+                       @dd = (@dd.last == bSTART) ? [bSTART] : []
+                   end
+                elsif data == bSTOP # Erken veya gec gelen STOP -> Dummy data
+                    puts "DEBUG: dummy data: " + @dd.join(',')
+                    @dd = []
+                elsif @dd.count > bSIZE
+                    puts "DEBUG: <IMPOSSIBLE> dummy data: " + @dd.join(',')
+
+                    # En son gelen bSTART tan sonra ki, gelen kısmını kurtarmaya çalış
+                    j = @dd.each_index.select{|i| @dd[i] == bSTART}.last
+                    if j > 0
+                        @dd = @dd[j..-1]
+                        if @dd.count == bSIZE and @dd.first == bSTART and @dd.last == bSTOP
+                            @channel.push @dd
+                            puts "Serialport:READ:Binary: #{@dd.join(',')}"
+                            @dd = []
+                        end
+                    else
+                        @dd = []
+                    end
+                end
+             rescue
+                 bSTART = 253; bSTOP = 254; bSIZE = 6
+               if @dd and not @dd.empty? and @dd.count == bSIZE and @dd.first == bSTART and @dd.last == bSTOP
+                   @channel.push @dd
+                   puts "Serialport:READ:Binary: #{@dd.join(',')}"
+                   @dd = []
+               else
+                   puts "DEBUG: dummy data: " + @dd.join(',')
+                   @dd = []
+               end
+
+               next
+             end
+           end
+         end
+
+        # EM::defer do
+        #   loop do
+        #     data = @serialport.gets.gsub(/[\r\n]/,'') rescue next
+        #     data = data.to_i if data =~ /^\d+$/
+        #     next if !data or data.to_s.empty?
+        #     puts data
+        #     @channel.push data
+        #   end
+        # end
+
+        #EM::defer do
+        #  loop do
+        #    line = STDIN.gets.gsub(/[\r\n]/,'') rescue next
+        #    next if !line or line.to_s.empty?
+        #    @serialport.puts line rescue next
+        #  end
+        #end
 
       end
     end
