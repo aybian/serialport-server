@@ -1,7 +1,9 @@
 Build
 =======
+```sh
 gem build GEMNAME.gemspec
 gem install gemname-version.gem
+```
 
 https://stackoverflow.com/questions/2577346/how-to-install-gem-from-github-source
 
