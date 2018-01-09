@@ -1,3 +1,10 @@
+Build
+=======
+gem build GEMNAME.gemspec
+gem install gemname-version.gem
+
+https://stackoverflow.com/questions/2577346/how-to-install-gem-from-github-source
+
 SerialPort Server
 =================
 SerialPort Server makes your Device (Arduino, mbed...) WebServer. You can access SerialPort via HTTP, WebSocket and TCP Socket.
